@@ -108,3 +108,74 @@ def delete_post(id):
 	else:
 		con.close()
 		return Response(json.dumps({"message": "Du har ikke tilgang til det innlegget"}), 403, content_type="application/json")
+
+@app.get("/api/v1/users/all")
+def list_users():
+	con = sqlite3.connect("twitter.db")
+	con.row_factory = sqlite3.Row
+	cur = con.cursor()
+	users = cur.execute("SELECT * FROM users ORDER BY user_id DESC").fetchall()
+	users_return = []
+	for user in users:
+		user_id = user["user_id"]
+		user_posts = cur.execute(f"SELECT post_id FROM posts WHERE post_user_id IS {user_id}").fetchall()
+		user_return = {
+			"user_id": user["user_id"],
+			"user_name": user["user_name"],
+			"user_posts": [row["post_id"] for row in user_posts]
+			}
+		users_return.append(user_return)
+	con.close()
+	return Response(json.dumps(users_return), 200, content_type="application/json")
+	
+@app.get("/api/v1/users/<int:id>")
+def get_user(id):
+	con = sqlite3.connect("twitter.db")
+	con.row_factory = sqlite3.Row
+	cur = con.cursor()
+	user = cur.execute(f"SELECT * FROM users WHERE user_id IS {id}").fetchone()
+	#user is a Row object, which acts like dict
+	if user == None:
+		return Response(status=404, response=json.dumps({"message":"user not found"}), content_type="application/json")
+	user_id = user["user_id"]
+	user_posts = cur.execute(f"SELECT post_id FROM posts WHERE post_user_id IS {user_id}").fetchall()
+	con.close()
+	return Response(json.dumps({
+		"user_id": user["user_id"],
+		"user_name": user["user_name"],
+		"user_posts": [row["post_id"] for row in user_posts]
+	}),
+	200,
+	content_type="application/json")
+
+@app.get("/api/v1/users/<int:id>/posts")
+def list_user_posts(id):
+	con = sqlite3.connect("twitter.db")
+	con.row_factory = sqlite3.Row
+	cur = con.cursor()
+	posts = cur.execute(f"SELECT * FROM posts WHERE post_user_id IS {id} ORDER BY post_id DESC").fetchall()
+	user_name = cur.execute(f"SELECT user_name FROM users WHERE user_id IS {id}").fetchone()["user_name"]
+	posts_return = []
+	for post in posts:
+		post_return = {
+			"post_id": post["post_id"],
+			"post_user_id": id,
+			"user_name": user_name,
+			"post_body": post["post_body"]
+			}
+		posts_return.append(post_return)
+	con.close()
+	return Response(json.dumps(posts_return), 200, content_type="application/json")
+
+@app.post("/api/v1/users/register")
+def register_user():
+	new_user = request.get_json()
+	#the only way I have found to deliver proper json is (curl --json @jsontest.json --url localhost:5000/posts/create) and postman
+	user_name, user_token = new_user.values()
+	con = sqlite3.connect("twitter.db")
+	cur = con.cursor()
+	cur.execute(f"INSERT INTO users(user_name, user_token) VALUES ('{user_name}', {user_token})")
+	con.commit()
+	id = cur.execute("SELECT user_id FROM users ORDER BY user_id DESC LIMIT 1").fetchone()[0]
+	con.close()
+	return Response(json.dumps({"message": "Ny bruker ble registrert"}), 201, {"Location": f"/users/{id}"}, content_type="application/json")
